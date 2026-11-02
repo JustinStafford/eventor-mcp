@@ -29,6 +29,27 @@ export interface EndpointDef {
   experimental?: boolean;
   /** Fixed query parameters always sent. */
   fixedQuery?: Record<string, string>;
+  /** Parameters applied locally to the parsed response rather than sent to Eventor. */
+  localParams?: ZodRawShape;
+  filter?: (doc: unknown, args: Record<string, unknown>) => unknown;
+}
+
+/** Local filters for list_organisations, whose full response is ~200k characters. */
+function filterOrganisations(doc: unknown, args: Record<string, unknown>): unknown {
+  const list = (doc as { OrganisationList?: { Organisation?: Array<Record<string, unknown>> } }).OrganisationList;
+  if (!list?.Organisation) return doc;
+  const name = typeof args.nameContains === "string" ? args.nameContains.toLowerCase() : undefined;
+  const types = args.organisationTypeIds as number[] | undefined;
+  const parent = args.parentOrganisationId as number | undefined;
+  const parentOf = (o: Record<string, unknown>) =>
+    (o.ParentOrganisation as { OrganisationId?: string } | undefined)?.OrganisationId;
+  const orgs = list.Organisation.filter(
+    (o) =>
+      (!name || [o.Name, o.ShortName, o.MediaName].some((n) => typeof n === "string" && n.toLowerCase().includes(name))) &&
+      (!types || types.map(String).includes(String(o.OrganisationTypeId))) &&
+      (parent === undefined || parentOf(o) === String(parent)),
+  );
+  return { OrganisationList: { ...list, Organisation: orgs } };
 }
 
 // ---- reusable parameter schemas -------------------------------------------------
@@ -187,12 +208,19 @@ export const ENDPOINTS: EndpointDef[] = [
   {
     name: "list_organisations",
     title: "List organisations",
-    description: "List all federations, state associations and clubs. Large response; it is cached.",
+    description:
+      "List federations, state associations and clubs. The full list is ~200k characters, so use the local filters (nameContains, organisationTypeIds, parentOrganisationId) where possible.",
     method: "GET",
     path: "organisations",
     auth: "apiKey",
     returns: "OrganisationList",
     params: { includeProperties: flag("Include extended organisation information.").optional() },
+    localParams: {
+      nameContains: z.string().min(1).describe("Only organisations whose name contains this text (case-insensitive).").optional(),
+      organisationTypeIds: ids("Only these types: 1=national federation, 2=state/regional association, 3=club, 5=IOF.").optional(),
+      parentOrganisationId: id("Only direct children of this organisation, e.g. the clubs of a state association.").optional(),
+    },
+    filter: filterOrganisations,
   },
   {
     name: "list_organisations_iofxml",
@@ -260,7 +288,8 @@ export const ENDPOINTS: EndpointDef[] = [
     name: "get_competitor",
     title: "Get competitor settings",
     description:
-      "Get one person's event settings (pre-selected classes, punching cards). competitorId is Eventor's internal competitor ID, not the public personId.",
+      "Get one person's event settings (pre-selected classes, punching cards). competitorId is Eventor's internal competitor ID, not the public personId. " +
+      "Note: on Eventor Australia this returned 403 for competitor IDs and an empty element for person IDs when tested; list_competitors returns the same data reliably.",
     method: "GET",
     path: "competitor/{competitorId}",
     auth: "apiKey",

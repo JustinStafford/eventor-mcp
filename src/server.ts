@@ -22,13 +22,17 @@ export function normaliseDate(key: string, value: unknown): unknown {
   return value;
 }
 
-/** Text returned to the model: JSON for XML responses (unless raw), truncated to the configured limit. */
-export function formatBody(body: string, raw: boolean, maxChars: number): string {
+/**
+ * Text returned to the model: JSON for XML responses (unless raw), optionally
+ * filtered locally, truncated to the configured limit.
+ */
+export function formatBody(body: string, raw: boolean, maxChars: number, filter?: (doc: unknown) => unknown): string {
   const looksXml = body.trimStart().startsWith("<");
   let text = body;
   if (!raw && looksXml) {
     try {
-      text = JSON.stringify(parseXml(body));
+      const doc = parseXml(body);
+      text = JSON.stringify(filter ? filter(doc) : doc);
     } catch {
       text = body;
     }
@@ -59,6 +63,7 @@ export function buildRequest(def: EndpointDef, args: Record<string, unknown>) {
   let path = def.path;
   const query: Record<string, QueryValue> = { ...def.fixedQuery };
   for (const [key, value] of Object.entries(rest)) {
+    if (def.localParams && key in def.localParams) continue;
     if (path.includes(`{${key}}`)) {
       path = path.replace(`{${key}}`, encodeURIComponent(String(value)));
     } else {
@@ -77,6 +82,7 @@ export function buildRequest(def: EndpointDef, args: Record<string, unknown>) {
 function registerEndpoint(server: McpServer, client: EventorClient, def: EndpointDef) {
   const inputSchema = {
     ...def.params,
+    ...def.localParams,
     ...(def.write ? { confirm: confirmParam } : { raw: rawParam }),
   };
   const notes = [
@@ -109,7 +115,8 @@ function registerEndpoint(server: McpServer, client: EventorClient, def: Endpoin
           body: def.xmlBody ? req.body : undefined,
           auth: resolveAuth(def, client.config, req.useLogin),
         });
-        const text = formatBody(res.body, req.raw, client.config.maxResponseChars);
+        const filter = def.filter ? (doc: unknown) => def.filter!(doc, args) : undefined;
+        const text = formatBody(res.body, req.raw, client.config.maxResponseChars, filter);
         return { content: [{ type: "text", text: text || `HTTP ${res.status} (empty response)` }] };
       } catch (err) {
         return errorResult(err);

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type Instance = "au" | "se" | "no" | "iof";
 
@@ -38,9 +39,18 @@ export function loadEnvFile(path: string, env: NodeJS.ProcessEnv = process.env):
   }
 }
 
-/** Config file locations checked, in order, when variables are not already set. */
+/**
+ * Config file locations checked, in order, when variables are not already set:
+ * the working directory, the server's own install directory (for git clones),
+ * then ~/.config/eventor-mcp.
+ */
 export function defaultEnvFiles(): string[] {
-  return [join(process.cwd(), ".env"), join(homedir(), ".config", "eventor-mcp", ".env")];
+  const installDir = join(dirname(fileURLToPath(import.meta.url)), "..");
+  return [
+    join(process.cwd(), ".env"),
+    join(installDir, ".env"),
+    join(homedir(), ".config", "eventor-mcp", ".env"),
+  ];
 }
 
 function blankToUndefined(v: string | undefined): string | undefined {

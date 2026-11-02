@@ -135,7 +135,9 @@ export class EventorClient {
 
 function describeHttpError(status: number, method: string, url: string, body: string): string {
   const path = new URL(url).pathname;
-  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 500);
+  // IIS error pages are HTML; their <title> is the useful part.
+  const title = /<title>([^<]*)<\/title>/i.exec(body)?.[1];
+  const snippet = (title ?? body).replace(/\s+/g, " ").trim().slice(0, 500);
   const hint =
     status === 401 || status === 403
       ? " Check the API key / login, and that the organisation ID is your own club's (many endpoints only allow your own organisation)."
@@ -161,9 +163,26 @@ const parser = new XMLParser({
   },
 });
 
+/**
+ * Strip XML noise that carries no information for a reader: namespace
+ * declarations, and `<X value="..."/>` wrappers, which become plain values.
+ */
+function compact(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(compact);
+  if (node === null || typeof node !== "object") return node;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith("@xmlns")) continue;
+    out[key] = compact(value);
+  }
+  const keys = Object.keys(out);
+  if (keys.length === 1 && keys[0] === "@value") return out["@value"];
+  return out;
+}
+
 /** Parse an Eventor XML document into a plain JSON-able object. */
 export function parseXml(xml: string): unknown {
   const doc = parser.parse(xml) as Record<string, unknown>;
   delete doc["?xml"];
-  return doc;
+  return compact(doc);
 }

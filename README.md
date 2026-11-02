@@ -21,7 +21,11 @@ Every endpoint on each instance's [API documentation page](https://eventor.orien
 
 ✏️ = writes to Eventor. These tools are marked destructive and need `confirm: true`, which the model should only set after you approve the change. Set `EVENTOR_READ_ONLY=true` to hide them completely.
 
-The organiser export/import endpoints aren't in Eventor's public docs. Event software such as MeOS uses them, and they may behave differently between instances.
+The organiser export/import endpoints aren't in Eventor's public docs. Event software such as MeOS uses them, and they may behave differently between instances. On Eventor Australia, all five exports work with a club API key (tested November 2026). The import tools haven't been tested, because they publish data.
+
+### Tested against Eventor Australia
+
+Every read tool was called against real Newcastle Orienteering Club data, and all returned data except one: `get_competitor` returned 403 for competitor IDs and an empty element for person IDs. Use `list_competitors` instead. `get_activity` wasn't tested because the club has no activities in Eventor, and `get_external_login_url` wasn't called because it creates a real login link. The write tools haven't been run.
 
 Responses are converted from Eventor's XML to compact JSON. Pass `raw: true` to get the XML unchanged, for example to load an IOF XML start list into event software. GET responses are cached for 5 minutes, as Eventor's terms of use ask.
 
@@ -58,7 +62,7 @@ Add this to `claude_desktop_config.json`:
 }
 ```
 
-Instead of putting secrets in the client config, you can put them in `~/.config/eventor-mcp/.env`, or in `.env` in the directory the server runs from. Variables already set in the environment take precedence.
+Instead of putting secrets in the client config, you can put them in a `.env` file (see `.env.example`). The server checks the directory it runs from, then its own install directory (the clone), then `~/.config/eventor-mcp/.env`. Variables already set in the environment take precedence. `.env` is git-ignored.
 
 ## Configuration
 
@@ -77,7 +81,7 @@ Credentials are only read from the environment. They never appear in tool argume
 ## Things to know
 
 - **Your own club only.** An API key belongs to one organisation. Members, competitors, memberships, activities, external login links and club starts/results only work for that organisation's ID. Call `get_api_key_organisation` first to find it.
-- **Keep queries narrow.** `list_organisations`, `list_entries` and results with split times can be very large. Use date ranges, IDs and `top`.
+- **Keep queries narrow.** `list_organisations`, `list_entries` and results with split times can be very large. Use date ranges, IDs and `top`. `list_organisations` also has local filters (`nameContains`, `organisationTypeIds`, `parentOrganisationId`) that are applied after the download.
 - Dates are `yyyy-mm-dd` or `yyyy-mm-dd hh:mm:ss`. A date-only "from" starts at 00:00:00 and a date-only "to" ends at 23:59:59.
 
 ## Development

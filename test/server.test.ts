@@ -126,6 +126,29 @@ describe("MCP server", () => {
     expect(xml).toMatch(/^<Organisation>/);
   });
 
+  it("flattens value wrappers and drops namespace attributes", () => {
+    const doc = parseXml('<A xmlns:xsi="x"><CountryId value="36"/><Name lang="en">Oz</Name></A>');
+    expect(doc).toEqual({ A: { CountryId: "36", Name: { "#text": "Oz", "@lang": "en" } } });
+  });
+
+  it("filters list_organisations locally without sending filter params", async () => {
+    const xml =
+      "<OrganisationList>" +
+      "<Organisation><OrganisationId>5</OrganisationId><Name>Orienteering NSW</Name><OrganisationTypeId>2</OrganisationTypeId></Organisation>" +
+      "<Organisation><OrganisationId>29</OrganisationId><Name>Newcastle Orienteering Club</Name><OrganisationTypeId>3</OrganisationTypeId><ParentOrganisation><OrganisationId>5</OrganisationId></ParentOrganisation></Organisation>" +
+      "<Organisation><OrganisationId>30</OrganisationId><Name>Bushflyers</Name><OrganisationTypeId>3</OrganisationTypeId><ParentOrganisation><OrganisationId>5</OrganisationId></ParentOrganisation></Organisation>" +
+      "</OrganisationList>";
+    const { client, fetchFn } = await connect(baseEnv, mockFetch(xml));
+    const ids = async (args: Record<string, unknown>) =>
+      JSON.parse(text(await client.callTool({ name: "list_organisations", arguments: args }))).OrganisationList.Organisation.map(
+        (o: { OrganisationId: string }) => o.OrganisationId,
+      );
+    expect(await ids({ nameContains: "newcastle" })).toEqual(["29"]);
+    expect(await ids({ organisationTypeIds: [3], parentOrganisationId: 5 })).toEqual(["29", "30"]);
+    expect(await ids({ organisationTypeIds: [2] })).toEqual(["5"]);
+    expect(new URL(fetchFn.mock.calls[0][0] as string).search).toBe("");
+  });
+
   it("caches GET responses", async () => {
     const { client, fetchFn } = await connect();
     await client.callTool({ name: "get_organisation", arguments: { id: 1 } });
