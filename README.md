@@ -16,12 +16,16 @@ Every endpoint on each instance's [API documentation page](https://eventor.orien
 | Start lists | `get_event_starts`, `get_event_starts_iofxml`, `get_person_starts`, `get_organisation_starts` |
 | Results | `get_event_results`, `get_event_results_iofxml`, `get_wrs_class_results` (IOF), `get_person_results`, `get_organisation_results` |
 | Club activities | `list_activities`, `get_activity` |
-| Organiser (experimental) | `export_organisations`, `export_classes`, `export_entries`, `export_competitors`, `export_cached_competitors`, `import_startlist` ✏️, `import_resultlist` ✏️ |
+| Organiser (experimental) | `export_organisations`, `export_event`, `export_base_classes`, `export_classes`, `export_entries`, `export_competitors`, `export_cached_competitors`, `import_startlist` ✏️, `import_resultlist` ✏️ |
 | Utilities | `eventor_get` (GET any path), `clear_cache` |
 
 ✏️ = writes to Eventor. These tools are marked destructive and need `confirm: true`, which the model should only set after you approve the change. Set `EVENTOR_READ_ONLY=true` to hide them completely.
 
-The organiser export/import endpoints aren't in Eventor's public docs. Event software such as MeOS uses them, and they may behave differently between instances. On Eventor Australia, all five exports work with a club API key (tested November 2026). The import tools haven't been tested, because they publish data.
+The organiser export/import endpoints aren't in Eventor's public docs. Event software such as MeOS uses them, and they may behave differently between instances. On Eventor Australia, all seven exports work with a club API key (tested November 2026).
+
+### What the API can't do
+
+Eventor's API can't create or edit events, classes, entry fees, documents or entries, and it can't change an event's status. On the website these are only HTML forms behind a CAPTCHA-protected login, with no API equivalent. The only writes the API supports are competitor settings and start list/result list uploads, and this server covers all three. The import tools haven't been tested, because they publish data.
 
 ### Tested against Eventor Australia
 
