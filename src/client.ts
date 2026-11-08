@@ -80,7 +80,14 @@ export class EventorClient {
   }
 
   url(path: string, query?: Record<string, QueryValue>): string {
-    const url = new URL(path.replace(/^\/+/, "").replace(/^api\//, ""), this.config.baseUrl);
+    const base = new URL(this.config.baseUrl);
+    const url = new URL(path.replace(/^\/+/, "").replace(/^api\//, ""), base);
+    // The credentials go wherever this URL points, so check what the parser
+    // produced. It forgives things a check on the input can't see: leading
+    // spaces, tabs inside the scheme, backslashes, encoded dots.
+    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) {
+      throw new EventorError("Refused: the path must stay within the Eventor API root.");
+    }
     const qs = buildQuery(query).toString();
     if (qs) url.search = qs;
     return url.toString();
@@ -106,7 +113,14 @@ export class EventorClient {
 
     let res: Response;
     try {
-      res = await this.fetchFn(url, { method, headers, body: opts.body, signal: AbortSignal.timeout(60_000) });
+      // No redirects: fetch would carry the ApiKey header to wherever one pointed.
+      res = await this.fetchFn(url, {
+        method,
+        headers,
+        body: opts.body,
+        redirect: "error",
+        signal: AbortSignal.timeout(60_000),
+      });
     } catch (err) {
       throw new EventorError(`Request to Eventor failed: ${(err as Error).message}`);
     }

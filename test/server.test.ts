@@ -207,4 +207,35 @@ describe("MCP server", () => {
     expect(res.isError).toBe(true);
     expect(fetchFn).not.toHaveBeenCalled();
   });
+
+  it.each([
+    "\\\\evil.example/x",
+    "\\/evil.example/x",
+    " https://evil.example/x",
+    "\thttps://evil.example/x",
+    "ht\ntps://evil.example/x",
+    "HTTPS://evil.example/x",
+    "ftp://evil.example/x",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "%2e%2e/account/login",
+    "%2E%2e/%2e%2e/account/login",
+  ])("eventor_get never sends the key outside the API root: %j", async (path) => {
+    const { client, fetchFn } = await connect();
+    const res = await client.callTool({ name: "eventor_get", arguments: { path } });
+    expect(res.isError).toBe(true);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("eventor_get still reaches paths inside the API root", async () => {
+    const { client, fetchFn } = await connect();
+    await client.callTool({ name: "eventor_get", arguments: { path: "/api/events", query: { eventIds: "1" } } });
+    expect(fetchFn.mock.calls[0][0]).toBe("https://eventor.orienteering.asn.au/api/events?eventIds=1");
+  });
+
+  it("does not follow redirects, which would carry the API key along", async () => {
+    const { client, fetchFn } = await connect();
+    await client.callTool({ name: "get_event", arguments: { eventId: 1 } });
+    expect(fetchFn.mock.calls[0][1]!.redirect).toBe("error");
+  });
 });
