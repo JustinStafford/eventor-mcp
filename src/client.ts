@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import type { Config } from "./config.js";
 
 /** Which credentials a request carries. */
-export type AuthMode = "apiKey" | "person" | "both" | "none";
+export type AuthMode = "apiKey" | "person";
 
 export type QueryValue = string | number | boolean | Array<string | number> | undefined | null;
 
@@ -11,7 +11,7 @@ export interface RequestOptions {
   query?: Record<string, QueryValue>;
   auth?: AuthMode;
   body?: string;
-  /** Extra headers, e.g. Username/Password for authenticatePerson. */
+  /** Extra headers. */
   headers?: Record<string, string>;
   /** Skip the response cache (GET only). */
   noCache?: boolean;
@@ -66,13 +66,13 @@ export class EventorClient {
 
   private authHeaders(mode: AuthMode): Record<string, string> {
     const headers: Record<string, string> = {};
-    if (mode === "apiKey" || mode === "both") {
+    if (mode === "apiKey") {
       if (!this.config.apiKey) {
         throw new EventorError("EVENTOR_API_KEY is not set. Add your club's Eventor API key to the server's environment.");
       }
       headers.ApiKey = this.config.apiKey;
     }
-    if (mode === "person" || mode === "both") {
+    if (mode === "person") {
       if (!this.config.username || !this.config.password) {
         throw new EventorError(
           "This endpoint needs a personal Eventor login. Set EVENTOR_USERNAME and EVENTOR_PASSWORD in the server's environment.",

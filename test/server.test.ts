@@ -66,19 +66,21 @@ describe("endpoint table", () => {
     const names = ENDPOINTS.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
   });
-  it("covers every documented Eventor Australia endpoint", () => {
+  it("covers the documented Eventor Australia endpoints, except two left out on purpose", () => {
     const au = endpointsFor("au").map((e) => `${e.method} ${e.path}`);
     for (const p of [
       "GET events", "GET events/iofxml", "GET events/documents", "GET event/{eventId}", "GET event/iofxml/{eventId}",
       "GET eventclasses", "GET entryfees/events/{eventId}", "GET organisation/apiKey", "GET organisations",
       "GET organisations/iofxml", "GET organisation/{id}", "GET persons/organisations/{organisationId}",
-      "GET competitors", "GET externalLoginUrl", "GET authenticatePerson", "GET entries", "GET competitorcount",
+      "GET competitors", "GET entries", "GET competitorcount",
       "GET starts/event", "GET starts/event/iofxml", "GET starts/person", "GET starts/organisation",
       "GET results/event", "GET results/event/iofxml", "GET results/person", "GET results/organisation",
       "GET activities", "GET activity", "GET competitor/{competitorId}", "PUT competitor", "GET memberships",
     ]) {
       expect(au).toContain(p);
     }
+    expect(au).not.toContain("GET externalLoginUrl");
+    expect(au).not.toContain("GET authenticatePerson");
   });
   it("filters instance-specific endpoints", () => {
     const no = endpointsFor("no").map((e) => e.name);
@@ -92,10 +94,14 @@ describe("endpoint table", () => {
 });
 
 describe("MCP server", () => {
-  it("lists all Australian tools plus utilities", async () => {
+  it("lists all Australian tools plus clear_cache", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.length).toBe(endpointsFor("au").length + 2);
+    expect(tools.length).toBe(endpointsFor("au").length + 1);
+    const names = tools.map((t) => t.name);
+    for (const removed of ["eventor_get", "get_external_login_url", "authenticate_person"]) {
+      expect(names).not.toContain(removed);
+    }
     const save = tools.find((t) => t.name === "save_competitor")!;
     expect(save.annotations?.destructiveHint).toBe(true);
     expect(save.inputSchema.required).toContain("confirm");
@@ -175,18 +181,16 @@ describe("MCP server", () => {
     expect(init!.body).toBe("<Competitor/>");
   });
 
-  it("uses the personal login for authenticate_person and organiser useLogin", async () => {
+  it("uses the personal login for organiser useLogin", async () => {
     const env = { ...baseEnv, EVENTOR_USERNAME: "me", EVENTOR_PASSWORD: "pw" };
     const { client, fetchFn } = await connect(env);
-    await client.callTool({ name: "authenticate_person", arguments: {} });
     await client.callTool({ name: "export_classes", arguments: { eventId: 5, useLogin: true } });
-    for (const [, init] of fetchFn.mock.calls) {
-      const h = init!.headers as Record<string, string>;
-      expect(h.Username).toBe("me");
-      expect(h.Password).toBe("pw");
-      expect(h.ApiKey).toBeUndefined();
-    }
-    expect(new URL(fetchFn.mock.calls[1][0] as string).searchParams.get("version")).toBe("3.0");
+    const [url, init] = fetchFn.mock.calls[0];
+    const h = init!.headers as Record<string, string>;
+    expect(h.Username).toBe("me");
+    expect(h.Password).toBe("pw");
+    expect(h.ApiKey).toBeUndefined();
+    expect(new URL(url as string).searchParams.get("version")).toBe("3.0");
   });
 
   it("reports missing credentials and HTTP errors as tool errors", async () => {
@@ -201,36 +205,11 @@ describe("MCP server", () => {
     expect(text(res2)).toMatch(/HTTP 403.*own club/);
   });
 
-  it("eventor_get rejects absolute URLs", async () => {
-    const { client, fetchFn } = await connect();
-    const res = await client.callTool({ name: "eventor_get", arguments: { path: "https://evil.example/x" } });
-    expect(res.isError).toBe(true);
-    expect(fetchFn).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    "\\\\evil.example/x",
-    "\\/evil.example/x",
-    " https://evil.example/x",
-    "\thttps://evil.example/x",
-    "ht\ntps://evil.example/x",
-    "HTTPS://evil.example/x",
-    "ftp://evil.example/x",
-    "file:///etc/passwd",
-    "javascript:alert(1)",
-    "%2e%2e/account/login",
-    "%2E%2e/%2e%2e/account/login",
-  ])("eventor_get never sends the key outside the API root: %j", async (path) => {
-    const { client, fetchFn } = await connect();
-    const res = await client.callTool({ name: "eventor_get", arguments: { path } });
-    expect(res.isError).toBe(true);
-    expect(fetchFn).not.toHaveBeenCalled();
-  });
-
-  it("eventor_get still reaches paths inside the API root", async () => {
-    const { client, fetchFn } = await connect();
-    await client.callTool({ name: "eventor_get", arguments: { path: "/api/events", query: { eventIds: "1" } } });
-    expect(fetchFn.mock.calls[0][0]).toBe("https://eventor.orienteering.asn.au/api/events?eventIds=1");
+  it("offers no tool that takes a free-form path", async () => {
+    const { client } = await connect();
+    for (const tool of (await client.listTools()).tools) {
+      expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("path");
+    }
   });
 
   it("does not follow redirects, which would carry the API key along", async () => {
@@ -249,7 +228,7 @@ describe("MCP server", () => {
   });
 
   describe("EVENTOR_EXCLUDE_TOOLS", () => {
-    const hidden = ["eventor_get", "get_external_login_url", "authenticate_person"];
+    const hidden = ["export_cached_competitors", "get_event"];
     const env = { ...baseEnv, EVENTOR_EXCLUDE_TOOLS: ` ${hidden.join(" , ")} ` };
 
     it("removes the named tools and leaves the rest", async () => {
@@ -257,23 +236,23 @@ describe("MCP server", () => {
       const names = (await client.listTools()).tools.map((t) => t.name);
       for (const name of hidden) expect(names).not.toContain(name);
       expect(names).toContain("clear_cache");
-      expect(names.length).toBe(endpointsFor("au").length + 2 - hidden.length);
+      expect(names.length).toBe(endpointsFor("au").length + 1 - hidden.length);
     });
 
     it("makes an excluded tool uncallable", async () => {
       const { client, fetchFn } = await connect(env);
-      const res = await client.callTool({ name: "get_external_login_url", arguments: { personId: 1, organisationId: 2 } });
+      const res = await client.callTool({ name: "get_event", arguments: { eventId: 1 } });
       expect(res.isError).toBe(true);
       expect(fetchFn).not.toHaveBeenCalled();
     });
 
-    it("can exclude both utilities", async () => {
-      const { client } = await connect({ ...baseEnv, EVENTOR_EXCLUDE_TOOLS: "eventor_get,clear_cache" });
+    it("can exclude clear_cache", async () => {
+      const { client } = await connect({ ...baseEnv, EVENTOR_EXCLUDE_TOOLS: "clear_cache" });
       expect((await client.listTools()).tools.length).toBe(endpointsFor("au").length);
     });
 
     it("fails at startup on a misspelled name", () => {
-      expect(() => createServer(loadConfig({ ...baseEnv, EVENTOR_EXCLUDE_TOOLS: "eventor_gett" }))).toThrow(/eventor_gett/);
+      expect(() => createServer(loadConfig({ ...baseEnv, EVENTOR_EXCLUDE_TOOLS: "get_evnt" }))).toThrow(/get_evnt/);
     });
   });
 
@@ -285,6 +264,39 @@ describe("MCP server", () => {
     };
     expect(await properties(baseEnv)).not.toContain("useLogin");
     expect(await properties({ ...baseEnv, EVENTOR_USERNAME: "me", EVENTOR_PASSWORD: "pw" })).toContain("useLogin");
+  });
+});
+
+describe("API root guard", () => {
+  function clientWith() {
+    const fetchFn = mockFetch();
+    return { fetchFn, c: new EventorClient(loadConfig(baseEnv), fetchFn as unknown as typeof fetch) };
+  }
+
+  it.each([
+    "https://evil.example/x",
+    "\\\\evil.example/x",
+    "\\/evil.example/x",
+    " https://evil.example/x",
+    "\thttps://evil.example/x",
+    "ht\ntps://evil.example/x",
+    "HTTPS://evil.example/x",
+    "ftp://evil.example/x",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "../account/login",
+    "%2e%2e/account/login",
+    "%2E%2e/%2e%2e/account/login",
+  ])("never sends credentials outside the API root: %j", async (path) => {
+    const { c, fetchFn } = clientWith();
+    await expect(c.request(path)).rejects.toThrow(/API root/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("allows paths inside the API root", async () => {
+    const { c, fetchFn } = clientWith();
+    await c.request("/api/events", { query: { eventIds: "1" } });
+    expect(fetchFn.mock.calls[0][0]).toBe("https://eventor.orienteering.asn.au/api/events?eventIds=1");
   });
 });
 

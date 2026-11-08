@@ -311,32 +311,6 @@ export const ENDPOINTS: EndpointDef[] = [
       xml: xmlParam("A complete Eventor <Competitor> XML element for a member of your organisation."),
     },
   },
-  {
-    name: "get_external_login_url",
-    title: "Get external login URL",
-    description:
-      "Create a single-use link (valid five minutes) that logs a member into Eventor. Only share it with that person.",
-    method: "GET",
-    path: "externalLoginUrl",
-    auth: "apiKey",
-    returns: "ExternalLoginUrl",
-    params: {
-      personId: id("Person ID of a member of the organisation."),
-      organisationId: id(`Organisation ID. ${ownOrg}`),
-      includeContactDetails: flag("Include contact details.").optional(),
-    },
-  },
-  {
-    name: "authenticate_person",
-    title: "Authenticate person",
-    description:
-      "Return the Eventor person matching the configured personal login (EVENTOR_USERNAME/PASSWORD). Useful to check the login works and find your personId.",
-    method: "GET",
-    path: "authenticatePerson",
-    auth: "person",
-    returns: "Person",
-    params: {},
-  },
 
   // Entries
   {

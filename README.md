@@ -6,18 +6,18 @@ It works with **Eventor Australia** (the default), **Sweden**, **Norway** and **
 
 ## Coverage
 
-Every endpoint on each instance's [API documentation page](https://eventor.orienteering.asn.au/api/documentation) has a tool. Endpoints that only one instance offers are only registered for that instance.
+Every endpoint on each instance's [API documentation page](https://eventor.orienteering.asn.au/api/documentation) has a tool, except two left out on purpose: `externalLoginUrl` (it creates a live login link for a member) and `authenticatePerson` (it checks a person's Eventor password). Endpoints that only one instance offers are only registered for that instance.
 
 | Area | Tools |
 |---|---|
 | Events | `list_events`, `list_events_iofxml`, `list_wrs_events` (IOF), `list_event_documents`, `get_event`, `get_event_iofxml`, `list_event_classes`, `list_entry_fees` |
-| Organisations & people | `get_api_key_organisation`, `list_organisations`, `list_organisations_iofxml`, `get_organisation`, `list_organisation_persons`, `list_memberships` (AU), `list_competitors`, `get_competitor`, `save_competitor` ✏️, `get_external_login_url`, `authenticate_person` |
+| Organisations & people | `get_api_key_organisation`, `list_organisations`, `list_organisations_iofxml`, `get_organisation`, `list_organisation_persons`, `list_memberships` (AU), `list_competitors`, `get_competitor`, `save_competitor` ✏️ |
 | Entries | `list_entries`, `get_competitor_count` |
 | Start lists | `get_event_starts`, `get_event_starts_iofxml`, `get_person_starts`, `get_organisation_starts` |
 | Results | `get_event_results`, `get_event_results_iofxml`, `get_wrs_class_results` (IOF), `get_person_results`, `get_organisation_results` |
 | Club activities | `list_activities`, `get_activity` |
 | Organiser (experimental) | `export_organisations`, `export_event`, `export_base_classes`, `export_classes`, `export_entries`, `export_competitors`, `export_cached_competitors`, `import_startlist` ✏️, `import_resultlist` ✏️ |
-| Utilities | `eventor_get` (GET any path), `clear_cache` |
+| Utilities | `clear_cache` |
 
 ✏️ = writes to Eventor. These tools are marked destructive and need `confirm: true`, which the model should only set after you approve the change. Set `EVENTOR_READ_ONLY=true` to hide them completely.
 
@@ -29,7 +29,7 @@ Eventor's API can't create or edit events, classes, entry fees, documents or ent
 
 ### Tested against Eventor Australia
 
-Every read tool was called against real Newcastle Orienteering Club data, and all returned data except one: `get_competitor` returned 403 for competitor IDs and an empty element for person IDs. Use `list_competitors` instead. `get_activity` wasn't tested because the club has no activities in Eventor, and `get_external_login_url` wasn't called because it creates a real login link. The write tools haven't been run.
+Every read tool was called against real Newcastle Orienteering Club data, and all returned data except one: `get_competitor` returned 403 for competitor IDs and an empty element for person IDs. Use `list_competitors` instead. `get_activity` wasn't tested because the club has no activities in Eventor. The write tools haven't been run.
 
 Responses are converted from Eventor's XML to compact JSON. Pass `raw: true` to get the XML unchanged, for example to load an IOF XML start list into event software. GET responses are cached for 5 minutes, as Eventor's terms of use ask.
 
@@ -75,15 +75,13 @@ Instead of putting secrets in the client config, you can put them in a `.env` fi
 | `EVENTOR_INSTANCE` | `au` | `au`, `se`, `no` or `iof` |
 | `EVENTOR_BASE_URL` | – | Any Eventor API root; overrides `EVENTOR_INSTANCE` and enables every tool |
 | `EVENTOR_API_KEY` | – | Club API key (sent as the `ApiKey` header) |
-| `EVENTOR_USERNAME` / `EVENTOR_PASSWORD` | – | Personal Eventor login, for `authenticate_person` and organiser tools with `useLogin: true` |
+| `EVENTOR_USERNAME` / `EVENTOR_PASSWORD` | – | Personal Eventor login, for organiser tools with `useLogin: true` |
 | `EVENTOR_CACHE_TTL_SECONDS` | `300` | Response cache lifetime; `0` disables it |
 | `EVENTOR_MAX_RESPONSE_CHARS` | `200000` | Longer responses are truncated with a hint to narrow the query |
 | `EVENTOR_READ_ONLY` | `false` | Hide all tools that write to Eventor |
 | `EVENTOR_EXCLUDE_TOOLS` | – | Comma-separated tool names not to offer. A misspelled name stops the server from starting |
 
 Credentials are only read from the environment. They never appear in tool arguments or results, and they are only ever sent to the configured Eventor API root: requests that would leave it are refused, and redirects are not followed.
-
-If you host this server for others, consider excluding `eventor_get` (it can reach any API path, including ones you've excluded), `get_external_login_url` (it creates a live login link for a member) and `authenticate_person`.
 
 ## Things to know
 

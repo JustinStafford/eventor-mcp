@@ -8,7 +8,7 @@ import { confirmParam, ENDPOINTS, endpointsFor, type EndpointDef } from "./endpo
 export const VERSION = "0.2.0";
 
 /** Tools registered here rather than generated from the endpoint table. */
-const UTILITY_TOOLS = ["eventor_get", "clear_cache"];
+const UTILITY_TOOLS = ["clear_cache"];
 
 const rawParam = z
   .boolean()
@@ -151,39 +151,6 @@ export function createServer(config: Config, client = new EventorClient(config))
 
   for (const def of endpointsFor(config.instance, config.readOnly)) {
     if (!excluded.has(def.name)) registerEndpoint(server, client, def);
-  }
-
-  if (!excluded.has("eventor_get")) {
-    server.registerTool(
-      "eventor_get",
-      {
-        title: "Raw Eventor GET",
-        description:
-          "Escape hatch: GET any Eventor API path (relative to /api/) with arbitrary query parameters, for endpoints not covered by a dedicated tool.",
-        inputSchema: z.strictObject({
-          path: z.string().min(1).describe('Path relative to the API root, e.g. "events" or "event/12345".'),
-          query: z
-            .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
-            .optional()
-            .describe("Query parameters."),
-          auth: z
-            .enum(["apiKey", "person", "both", "none"])
-            .default("apiKey")
-            .describe("Credentials to send: club API key, personal login, both, or none."),
-          raw: rawParam,
-        }),
-        annotations: { title: "Raw Eventor GET", readOnlyHint: true, openWorldHint: true },
-      },
-      async ({ path, query, auth, raw }): Promise<CallToolResult> => {
-        try {
-          if (/^https?:/i.test(path) || path.includes("..")) throw new Error("path must be relative to the Eventor API root.");
-          const res = await client.request(path, { query, auth });
-          return { content: [{ type: "text", text: formatBody(res.body, raw === true, client.config.maxResponseChars) }] };
-        } catch (err) {
-          return errorResult(err);
-        }
-      },
-    );
   }
 
   if (!excluded.has("clear_cache")) {
