@@ -1,6 +1,6 @@
 {
   "name": "eventor-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server covering the full Eventor orienteering API (Australia, Sweden, Norway, IOF)",
   "type": "module",
   "bin": {

@@ -22,6 +22,8 @@ export interface Config {
   cacheTtlMs: number;
   maxResponseChars: number;
   readOnly: boolean;
+  /** Tool names not to register, e.g. for a hosted deployment. */
+  excludeTools: string[];
 }
 
 /**
@@ -78,5 +80,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     cacheTtlMs: Number(env.EVENTOR_CACHE_TTL_SECONDS ?? 300) * 1000,
     maxResponseChars: Number(env.EVENTOR_MAX_RESPONSE_CHARS ?? 200_000),
     readOnly: /^(1|true|yes)$/i.test(env.EVENTOR_READ_ONLY ?? ""),
+    excludeTools: (env.EVENTOR_EXCLUDE_TOOLS ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean),
   };
 }

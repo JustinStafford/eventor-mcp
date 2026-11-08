@@ -3,9 +3,12 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { EventorClient, EventorError, parseXml, type AuthMode, type QueryValue } from "./client.js";
 import type { Config } from "./config.js";
-import { confirmParam, endpointsFor, type EndpointDef } from "./endpoints.js";
+import { confirmParam, ENDPOINTS, endpointsFor, type EndpointDef } from "./endpoints.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
+
+/** Tools registered here rather than generated from the endpoint table. */
+const UTILITY_TOOLS = ["eventor_get", "clear_cache"];
 
 const rawParam = z
   .boolean()
@@ -80,11 +83,15 @@ export function buildRequest(def: EndpointDef, args: Record<string, unknown>) {
 }
 
 function registerEndpoint(server: McpServer, client: EventorClient, def: EndpointDef) {
-  const inputSchema = {
-    ...def.params,
+  // useLogin can only fail unless a personal login is configured, so don't offer it.
+  const { useLogin: _useLogin, ...paramsWithoutLogin } = def.params;
+  const hasLogin = Boolean(client.config.username && client.config.password);
+  // Strict: a mistyped filter must be an error, not silently return unfiltered data.
+  const inputSchema = z.strictObject({
+    ...(hasLogin ? def.params : paramsWithoutLogin),
     ...def.localParams,
     ...(def.write ? { confirm: confirmParam } : { raw: rawParam }),
-  };
+  });
   const notes = [
     `Calls ${def.method} /api/${def.path}; returns ${def.returns}.`,
     def.experimental ? "Experimental: undocumented organiser endpoint, behaviour may differ between Eventor instances." : "",
@@ -136,51 +143,63 @@ export function createServer(config: Config, client = new EventorClient(config))
     },
   );
 
-  for (const def of endpointsFor(config.instance, config.readOnly)) registerEndpoint(server, client, def);
+  // A misspelled exclusion would silently expose the tool it meant to hide.
+  const known = new Set([...ENDPOINTS.map((e) => e.name), ...UTILITY_TOOLS]);
+  const unknown = config.excludeTools.filter((name) => !known.has(name));
+  if (unknown.length) throw new Error(`EVENTOR_EXCLUDE_TOOLS names unknown tools: ${unknown.join(", ")}`);
+  const excluded = new Set(config.excludeTools);
 
-  server.registerTool(
-    "eventor_get",
-    {
-      title: "Raw Eventor GET",
-      description:
-        "Escape hatch: GET any Eventor API path (relative to /api/) with arbitrary query parameters, for endpoints not covered by a dedicated tool.",
-      inputSchema: {
-        path: z.string().min(1).describe('Path relative to the API root, e.g. "events" or "event/12345".'),
-        query: z
-          .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
-          .optional()
-          .describe("Query parameters."),
-        auth: z
-          .enum(["apiKey", "person", "both", "none"])
-          .default("apiKey")
-          .describe("Credentials to send: club API key, personal login, both, or none."),
-        raw: rawParam,
+  for (const def of endpointsFor(config.instance, config.readOnly)) {
+    if (!excluded.has(def.name)) registerEndpoint(server, client, def);
+  }
+
+  if (!excluded.has("eventor_get")) {
+    server.registerTool(
+      "eventor_get",
+      {
+        title: "Raw Eventor GET",
+        description:
+          "Escape hatch: GET any Eventor API path (relative to /api/) with arbitrary query parameters, for endpoints not covered by a dedicated tool.",
+        inputSchema: z.strictObject({
+          path: z.string().min(1).describe('Path relative to the API root, e.g. "events" or "event/12345".'),
+          query: z
+            .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+            .optional()
+            .describe("Query parameters."),
+          auth: z
+            .enum(["apiKey", "person", "both", "none"])
+            .default("apiKey")
+            .describe("Credentials to send: club API key, personal login, both, or none."),
+          raw: rawParam,
+        }),
+        annotations: { title: "Raw Eventor GET", readOnlyHint: true, openWorldHint: true },
       },
-      annotations: { title: "Raw Eventor GET", readOnlyHint: true, openWorldHint: true },
-    },
-    async ({ path, query, auth, raw }): Promise<CallToolResult> => {
-      try {
-        if (/^https?:/i.test(path) || path.includes("..")) throw new Error("path must be relative to the Eventor API root.");
-        const res = await client.request(path, { query, auth });
-        return { content: [{ type: "text", text: formatBody(res.body, raw === true, client.config.maxResponseChars) }] };
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
-  );
+      async ({ path, query, auth, raw }): Promise<CallToolResult> => {
+        try {
+          if (/^https?:/i.test(path) || path.includes("..")) throw new Error("path must be relative to the Eventor API root.");
+          const res = await client.request(path, { query, auth });
+          return { content: [{ type: "text", text: formatBody(res.body, raw === true, client.config.maxResponseChars) }] };
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+  }
 
-  server.registerTool(
-    "clear_cache",
-    {
-      title: "Clear cache",
-      description: `Clear cached Eventor responses (GET responses are cached for ${Math.round(config.cacheTtlMs / 1000)}s, as Eventor's terms ask).`,
-      inputSchema: {},
-      annotations: { title: "Clear cache", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    },
-    async (): Promise<CallToolResult> => ({
-      content: [{ type: "text", text: `Cleared ${client.clearCache()} cached responses.` }],
-    }),
-  );
+  if (!excluded.has("clear_cache")) {
+    server.registerTool(
+      "clear_cache",
+      {
+        title: "Clear cache",
+        description: `Clear cached Eventor responses (GET responses are cached for ${Math.round(config.cacheTtlMs / 1000)}s, as Eventor's terms ask).`,
+        inputSchema: z.strictObject({}),
+        annotations: { title: "Clear cache", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      async (): Promise<CallToolResult> => ({
+        content: [{ type: "text", text: `Cleared ${client.clearCache()} cached responses.` }],
+      }),
+    );
+  }
 
   return server;
 }

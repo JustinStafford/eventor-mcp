@@ -79,8 +79,11 @@ Instead of putting secrets in the client config, you can put them in a `.env` fi
 | `EVENTOR_CACHE_TTL_SECONDS` | `300` | Response cache lifetime; `0` disables it |
 | `EVENTOR_MAX_RESPONSE_CHARS` | `200000` | Longer responses are truncated with a hint to narrow the query |
 | `EVENTOR_READ_ONLY` | `false` | Hide all tools that write to Eventor |
+| `EVENTOR_EXCLUDE_TOOLS` | – | Comma-separated tool names not to offer. A misspelled name stops the server from starting |
 
-Credentials are only read from the environment. They never appear in tool arguments or results.
+Credentials are only read from the environment. They never appear in tool arguments or results, and they are only ever sent to the configured Eventor API root: requests that would leave it are refused, and redirects are not followed.
+
+If you host this server for others, consider excluding `eventor_get` (it can reach any API path, including ones you've excluded), `get_external_login_url` (it creates a live login link for a member) and `authenticate_person`.
 
 ## Things to know
 

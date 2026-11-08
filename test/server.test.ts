@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it, vi } from "vitest";
-import { buildQuery, EventorClient, parseXml } from "../src/client.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildQuery, EventorClient, MAX_CACHE_CHARS, MAX_CACHE_ENTRIES, parseXml } from "../src/client.js";
 import { loadConfig } from "../src/config.js";
 import { ENDPOINTS, endpointsFor } from "../src/endpoints.js";
 import { createServer, formatBody, normaliseDate } from "../src/server.js";
@@ -237,5 +237,108 @@ describe("MCP server", () => {
     const { client, fetchFn } = await connect();
     await client.callTool({ name: "get_event", arguments: { eventId: 1 } });
     expect(fetchFn.mock.calls[0][1]!.redirect).toBe("error");
+  });
+
+  it("rejects unknown arguments instead of ignoring them", async () => {
+    const { client, fetchFn } = await connect();
+    const res = await client.callTool({ name: "get_event", arguments: { eventId: 1, nonsense: "x" } });
+    expect(res.isError).toBe(true);
+    expect(fetchFn).not.toHaveBeenCalled();
+    const util = await client.callTool({ name: "clear_cache", arguments: { nonsense: "x" } });
+    expect(util.isError).toBe(true);
+  });
+
+  describe("EVENTOR_EXCLUDE_TOOLS", () => {
+    const hidden = ["eventor_get", "get_external_login_url", "authenticate_person"];
+    const env = { ...baseEnv, EVENTOR_EXCLUDE_TOOLS: ` ${hidden.join(" , ")} ` };
+
+    it("removes the named tools and leaves the rest", async () => {
+      const { client } = await connect(env);
+      const names = (await client.listTools()).tools.map((t) => t.name);
+      for (const name of hidden) expect(names).not.toContain(name);
+      expect(names).toContain("clear_cache");
+      expect(names.length).toBe(endpointsFor("au").length + 2 - hidden.length);
+    });
+
+    it("makes an excluded tool uncallable", async () => {
+      const { client, fetchFn } = await connect(env);
+      const res = await client.callTool({ name: "get_external_login_url", arguments: { personId: 1, organisationId: 2 } });
+      expect(res.isError).toBe(true);
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+
+    it("can exclude both utilities", async () => {
+      const { client } = await connect({ ...baseEnv, EVENTOR_EXCLUDE_TOOLS: "eventor_get,clear_cache" });
+      expect((await client.listTools()).tools.length).toBe(endpointsFor("au").length);
+    });
+
+    it("fails at startup on a misspelled name", () => {
+      expect(() => createServer(loadConfig({ ...baseEnv, EVENTOR_EXCLUDE_TOOLS: "eventor_gett" }))).toThrow(/eventor_gett/);
+    });
+  });
+
+  it("offers useLogin only when a personal login is configured", async () => {
+    const properties = async (env: Record<string, string>) => {
+      const { client } = await connect(env);
+      const tool = (await client.listTools()).tools.find((t) => t.name === "export_classes")!;
+      return Object.keys(tool.inputSchema.properties ?? {});
+    };
+    expect(await properties(baseEnv)).not.toContain("useLogin");
+    expect(await properties({ ...baseEnv, EVENTOR_USERNAME: "me", EVENTOR_PASSWORD: "pw" })).toContain("useLogin");
+  });
+});
+
+describe("response cache limits", () => {
+  const entries = (c: EventorClient) => (c as unknown as { cache: Map<string, unknown> }).cache.size;
+  const chars = (c: EventorClient) => (c as unknown as { cacheChars: number }).cacheChars;
+
+  function clientWith(body: string) {
+    const config = loadConfig(baseEnv);
+    return new EventorClient(config, mockFetch(body) as unknown as typeof fetch);
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("never holds more than the entry limit, dropping the oldest first", async () => {
+    const fetchFn = mockFetch("<A/>");
+    const c = new EventorClient(loadConfig(baseEnv), fetchFn as unknown as typeof fetch);
+    for (let i = 0; i < MAX_CACHE_ENTRIES + 25; i++) await c.request(`event/${i}`);
+    expect(entries(c)).toBe(MAX_CACHE_ENTRIES);
+    const calls = fetchFn.mock.calls.length;
+    await c.request(`event/${MAX_CACHE_ENTRIES + 24}`);
+    expect(fetchFn.mock.calls.length).toBe(calls);
+    await c.request("event/0");
+    expect(fetchFn.mock.calls.length).toBe(calls + 1);
+  });
+
+  it("drops expired entries when storing a new one", async () => {
+    const c = clientWith("<A/>");
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    await c.request("event/1");
+    await c.request("event/2");
+    expect(entries(c)).toBe(2);
+    now.mockReturnValue(1_000_000 + 301_000);
+    await c.request("event/3");
+    expect(entries(c)).toBe(1);
+  });
+
+  it("keeps the total size under the limit and skips anything larger", async () => {
+    const half = clientWith("x".repeat(MAX_CACHE_CHARS / 2 + 1));
+    await half.request("event/1");
+    await half.request("event/2");
+    expect(entries(half)).toBe(1);
+    expect(chars(half)).toBe(MAX_CACHE_CHARS / 2 + 1);
+
+    const huge = clientWith("x".repeat(MAX_CACHE_CHARS + 1));
+    await huge.request("event/1");
+    expect(entries(huge)).toBe(0);
+    expect(chars(huge)).toBe(0);
+  });
+
+  it("keeps its size count right after a clear", async () => {
+    const c = clientWith("<A/>");
+    await c.request("event/1");
+    c.clearCache();
+    expect(chars(c)).toBe(0);
   });
 });

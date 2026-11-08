@@ -51,8 +51,13 @@ export function buildQuery(query: Record<string, QueryValue> = {}): URLSearchPar
 
 type FetchFn = typeof fetch;
 
+/** Limits on the response cache, so a long-running server can't grow without bound. */
+export const MAX_CACHE_ENTRIES = 500;
+export const MAX_CACHE_CHARS = 32_000_000;
+
 export class EventorClient {
   private cache = new Map<string, { expires: number; response: EventorResponse }>();
+  private cacheChars = 0;
 
   constructor(
     readonly config: Config,
@@ -134,15 +139,40 @@ export class EventorClient {
     if (!res.ok) {
       throw new EventorError(describeHttpError(res.status, method, url, body), res.status, body);
     }
-    if (cacheable) this.cache.set(cacheKey, { expires: Date.now() + this.config.cacheTtlMs, response });
+    if (cacheable) this.remember(cacheKey, response);
     // Any write invalidates cached reads, since they may now be stale.
-    if (method !== "GET") this.cache.clear();
+    if (method !== "GET") this.clearCache();
     return response;
+  }
+
+  private forget(key: string): void {
+    const entry = this.cache.get(key);
+    if (!entry) return;
+    this.cacheChars -= entry.response.body.length;
+    this.cache.delete(key);
+  }
+
+  /** Store a response, dropping expired entries and then the oldest to stay within the limits. */
+  private remember(key: string, response: EventorResponse): void {
+    const size = response.body.length;
+    this.forget(key);
+    if (size > MAX_CACHE_CHARS) return;
+    const now = Date.now();
+    for (const [k, entry] of this.cache) {
+      if (entry.expires <= now) this.forget(k);
+    }
+    for (const k of this.cache.keys()) {
+      if (this.cache.size < MAX_CACHE_ENTRIES && this.cacheChars + size <= MAX_CACHE_CHARS) break;
+      this.forget(k);
+    }
+    this.cache.set(key, { expires: now + this.config.cacheTtlMs, response });
+    this.cacheChars += size;
   }
 
   clearCache(): number {
     const n = this.cache.size;
     this.cache.clear();
+    this.cacheChars = 0;
     return n;
   }
 }
